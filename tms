@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
+# Idea copied from tmux-sessionizer by ThePrimeagen, bugs fixed with ChatGPT4
 
 if [[ $# -eq 1 ]]; then
     selected=$1
 else
-    selected=$(find ~/.config ~/.local/ ~/work ~/ ~/personal ~/school ~/personal/ai_fudgeing/ ~/personal/aoc/*/ -mindepth 1 -maxdepth 1 -type d | fzf)
+    selected=$(find ~/.config ~/.local/ ~/work ~/ /home ~/personal ~/school ~/school/cs324/repo/ ~/school/*/ ~/personal/ai_fudgeing/ ~/personal/aoc/*/ -mindepth 1 -maxdepth 1 -type d | fzf)
 fi
 
 if [[ -z $selected ]]; then
