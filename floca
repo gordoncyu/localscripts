@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+
+# Function to handle mv or cp action
+handle_mv_or_cp() {
+    source=$(floc "$1")
+    if [[ -z $source ]]; then
+        echo "Source not selected."
+        exit 1
+    fi
+    
+    dest=$(floc "d")
+    if [[ -z $dest ]]; then
+        echo "Destination not selected."
+        exit 1
+    fi
+    
+    if [[ -d $source ]]; then
+        cmd="$2 -r"
+    else
+        cmd="$2"
+    fi
+    
+    $cmd "$source" "$dest"
+}
+
+# Main function to handle actions
+handle_action() {
+    action="$1"
+    flags="$2"
+
+    case "$action" in
+        mv|cp)
+            handle_mv_or_cp "$flags" "$action"
+            ;;
+        cd)
+            dir=$(floc "d")
+            if [[ -z $dir ]]; then
+                echo "Directory not selected."
+                # exit 1
+            fi
+            cd "$dir" # || exit 1
+            ;;
+        *)
+            echo "Invalid action: $action"
+            # exit 1
+            ;;
+    esac
+}
+
+# Check if the correct number of arguments is passed
+if [ $# -lt 1 ]; then
+    echo "Usage: floca <action> [flags]"
+    exit 1
+fi
+
+action="$1"
+flags="$2"
+
+# Call the main function to handle actions
+handle_action "$action" "$flags"
+
