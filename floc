@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+
+dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+dir+="/cfg"
+
+get_working_locations() {
+    search_locations=""
+    while IFS= read -r line; do
+        search_locations+=" $(eval echo "$line")"
+    done < "$dir/wloc.txt"
+    echo $search_locations
+}
+
+get_frequent_locations() {
+    search_locations=""
+    while IFS= read -r line; do
+        search_locations+=$(eval echo "$line")$'\n'
+    done < "$dir/floc.txt"
+    echo -e "$search_locations"
+}
+
+# If no arguments are passed, simply list the directories
+if [ $# -eq 0 ]; then
+    { find $(get_working_locations) -mindepth 1 -maxdepth 1 -type d; get_frequent_locations; } | fzf
+    exit 0
+fi
+
+# Initialize variables
+search_type=""
+hidden_flag=true
+search_type_count=0
+
+arg="$1"
+
+for (( i=0; i<${#arg}; i++ )); do
+    char="${arg:$i:1}"
+    case "$char" in
+        f)
+            search_type="-type f"
+            ((search_type_count++))
+            ;;
+        d)
+            search_type="-type d"
+            ((search_type_count++))
+            ;;
+        a)
+            search_type=""
+            ((search_type_count++))
+            ;;
+        h)
+            hidden_flag=false
+            ;;
+        *)
+            echo "Invalid option: $char" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# Enforce only one search type
+if (( search_type_count > 1 )); then
+    echo "Only one search type (f, d, a) allowed."
+    exit 1
+fi
+
+# Get the selected directory from the initial floc call
+selected_dir=$(floc)
+
+# If a directory is selected, run find on it and then fzf
+if [[ ! -z $selected_dir ]]; then
+    pushd "$selected_dir" > /dev/null || exit
+
+    # Find files according to conditions
+    if $hidden_flag; then
+        selected_file=$(find ./ -maxdepth 15 $search_type -not -path '*/.*' | fzf)
+    else
+        selected_file=$(find ./ -maxdepth 15 $search_type | fzf)
+    fi
+
+    # If find found nothing, fallback to the selected directory
+    if [[ -z $selected_file ]]; then
+        selected_file="."
+    fi
+
+    # Convert to absolute path using realpath
+    if [[ ! -z $selected_file ]]; then
+        realpath "${selected_file}"
+    fi
+
+    popd > /dev/null || exit
+fi
+
