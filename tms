@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
-# Idea copied from tmux-sessionizer by ThePrimeagen, bugs fixed with ChatGPT4
+
+# Get the directory of the currently executing script
+dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ $# -eq 1 ]]; then
     selected=$1
 else
-    selected=$(find ~/.config ~/.local/ ~/work ~/ /home ~/personal ~/school ~/school/cs324/repo/ ~/school/*/ ~/personal/ai_fudgeing/ ~/personal/aoc/*/ -mindepth 1 -maxdepth 1 -type d | fzf)
+    # Read locations from floc.txt in the script's directory, expand tildes, and join them with spaces
+    search_locations=""
+    while IFS= read -r line; do
+        search_locations+=" $(eval echo $line)"
+    done < "$dir/wloc.txt"
+
+    selected=$(find $search_locations -mindepth 1 -maxdepth 1 -type d | fzf)
 fi
 
 if [[ -z $selected ]]; then
@@ -12,24 +20,20 @@ if [[ -z $selected ]]; then
 fi
 
 selected_name=$(basename "$selected" | tr . _)
-tmux_running=$(pgrep tmux)
 
 # If inside a tmux session
 if [[ ! -z $TMUX ]]; then
-    # If desired session doesn't exist, create it without attaching
     if ! tmux has-session -t=$selected_name 2> /dev/null; then
         tmux new-session -ds $selected_name -c $selected
     fi
-    # Switch to desired session
     tmux switch-client -t $selected_name
     exit 0
 fi
 
 # If outside a tmux session
-# If desired session exists, attach to it
 if tmux has-session -t=$selected_name 2> /dev/null; then
     tmux attach -t $selected_name
 else
-    # If it doesn't exist, create and attach
     tmux new-session -s $selected_name -c $selected
 fi
+
