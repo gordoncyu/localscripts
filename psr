@@ -1,0 +1,59 @@
+#!/bin/bash
+# Description: This script opens a Windows PowerShell session from within WSL.
+# It uses the current working directory or a provided path as the location for
+# the PowerShell session. Any additional arguments are passed on to powershell.exe.
+# It utilizes 'ospc' for path conversion.
+#
+# Usage: psr [path] [additional PowerShell arguments...]
+
+# Initialize variables
+input_path=""
+additional_args=""
+cmd_flag=""
+cmd_value=""
+
+# If a path is provided as the first argument, convert it using ospc
+if [ "$#" -ge 1 ] && [[ ! "$1" =~ ^- ]]; then
+    input_path="$1"
+    shift  # Remove first argument to leave any additional arguments
+fi
+
+# Capture the remaining arguments for PowerShell
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        -Command)
+            shift
+            cmd_flag="-Command"
+            cmd_value="$1"
+            ;;
+        *)
+            additional_args+=" $1"
+            ;;
+    esac
+    shift
+done
+
+# Convert the provided or current directory path using ospc
+if [ -z "$input_path" ]; then
+    input_path=$(pwd)
+fi
+converted_path=$(ospc "$input_path")
+
+# Prepare the command for PowerShell
+if [ -n "$cmd_flag" ] && [ -n "$cmd_value" ]; then
+    cmd_string="cd '$converted_path'; $cmd_value"
+else
+    cmd_string="cd '$converted_path'"
+fi
+
+# Open PowerShell session at the converted path, passing any additional arguments
+if [ -n "$converted_path" ]; then
+    if [ -n "$cmd_flag" ]; then
+        powershell.exe $cmd_flag "$cmd_string" $additional_args
+    else
+        powershell.exe -NoExit -Command "$cmd_string" $additional_args
+    fi
+else
+    powershell.exe -NoExit $additional_args
+fi
+
