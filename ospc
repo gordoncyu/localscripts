@@ -1,5 +1,6 @@
 #!/bin/bash
 # Converts paths between WSL Ubuntu 22.04 and Windows. -c copies the path to Windows Clipboard and -q wraps it in quotes if it contains spaces
+# If given stdin, operates line-wise
 
 copy_to_clipboard() {
     echo -n "$1" | clip.exe
@@ -19,61 +20,67 @@ done
 
 shift $((OPTIND-1))
 
-if [ "$#" -ne 1 ]; then
-    echo "Usage: $0 [-c] [-q] <path>"
-    exit 1
-fi
+process_path() {
+    local input_path="$1"
+    local is_wsl_windows_path=0
 
-input_path="$1"
-is_wsl_windows_path=0
-
-# Check if path starts with the WSL localhost prefix
-if [[ "$input_path" =~ ^\\\\wsl\.localhost\\Ubuntu-22\.04\\ ]]; then
-    is_wsl_windows_path=1
-    input_path=${input_path#\\\\wsl\.localhost\\Ubuntu-22\.04\\}
-fi
-
-quote() {
-    if [ $quote_flag -eq 1 ] && [[ "$1" =~ " " ]]; then
-        echo "\"$1\""
-    else
-        echo "$1"
+    # Check if path starts with the WSL localhost prefix
+    if [[ "$input_path" =~ ^\\\\wsl\.localhost\\Ubuntu-22\.04\\ ]]; then
+        is_wsl_windows_path=1
+        input_path=${input_path#\\\\wsl\.localhost\\Ubuntu-22\.04\\}
+        input_path="/${input_path//\\/\/}"
     fi
-}
 
-if [[ "$input_path" =~ ^[a-zA-Z]: ]]; then
-    # Windows path detected
-    drive=$(echo ${input_path:0:1} | tr '[:upper:]' '[:lower:]')
-    rest=${input_path:3}
-    wsl_path="/mnt/$drive/${rest//\\//}"
-    wsl_path=${wsl_path//\/\//\/}  # Remove any double slashes
-    wsl_path=$(quote "$wsl_path")
-    if [ $copy_flag -eq 1 ]; then
-        copy_to_clipboard "$wsl_path"
-    fi
-    echo "$wsl_path"
-elif [[ "$input_path" =~ ^/ ]]; then
-    # WSL path detected
-    if [[ "$input_path" =~ ^/mnt/ ]]; then
-        # It's actually a Windows path represented in WSL
-        drive=$(echo ${input_path:5:1} | tr '[:lower:]' '[:upper:]')
-        rest=${input_path:7}
-        win_path="$drive:${rest//\//\\}"
-    else
-        # It's a true WSL path
-        win_path="\\\\wsl.localhost\\Ubuntu-22.04$input_path"
+    quote() {
+        if [ $quote_flag -eq 1 ] && [[ "$1" =~ " " ]]; then
+            echo "\"$1\""
+        else
+            echo "$1"
+        fi
+    }
+
+    if [[ "$input_path" =~ ^[a-zA-Z]: ]]; then
+        # Windows path detected
+        local drive=$(echo ${input_path:0:1} | tr '[:upper:]' '[:lower:]')
+        local rest=${input_path:3}
+        local result_path="/mnt/$drive/${rest//\\/\/}"
+        result_path=${result_path//\/\//\/}  # Remove any double slashes
+    elif [[ "$input_path" =~ ^/ ]]; then
+        # WSL path detected
+        if [[ "$input_path" =~ ^/mnt/ ]]; then
+            # It's actually a Windows path represented in WSL
+            local drive=$(echo ${input_path:5:1} | tr '[:lower:]' '[:upper:]')
+            local rest=${input_path:7}
+            result_path="$drive:${rest//\//\\}"
+        else
+            # It's a true WSL path
+            result_path="\\\\wsl.localhost\\Ubuntu-22.04${input_path//\//\\}"
+        fi
     fi
 
     if [ $is_wsl_windows_path -eq 1 ]; then
         # Convert back to WSL path if it was originally a WSL Windows path
-        win_path=$input_path
+        result_path=$input_path
     fi
 
-    win_path=$(quote "$win_path")
+    result_path=$(quote "$result_path")
 
     if [ $copy_flag -eq 1 ]; then
-        copy_to_clipboard "$win_path"
+        copy_to_clipboard "$result_path"
     fi
-    echo "$win_path"
+    echo "$result_path"
+}
+
+if [ "$#" -eq 0 ]; then
+    while IFS= read -r input_path; do
+        # Process each line separately
+        process_path "$input_path"
+    done
+elif [ "$#" -eq 1 ]; then
+    input_path="$1"
+    process_path "$input_path"
+else
+    echo "Usage: $0 [-c] [-q] <path>"
+    exit 1
 fi
 
