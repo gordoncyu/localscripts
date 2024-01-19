@@ -21,7 +21,7 @@ get_frequent_locations() {
 
 # If no arguments are passed, simply list the directories
 if [ $# -eq 0 ]; then
-    { find $(get_working_locations) -mindepth 1 -maxdepth 1 -type d; get_frequent_locations; } | fzf
+    { find -L $(get_working_locations) -mindepth 1 -maxdepth 1 -type d 2> >(grep -v "Too many levels of symbolic links" >&2); get_frequent_locations; } | sort | uniq | fzf
     exit 0
 fi
 
@@ -72,9 +72,9 @@ if [[ ! -z $selected_dir ]]; then
 
     # Find files according to conditions
     if $hidden_flag; then
-        selected_file=$(find ./ -maxdepth 15 $search_type -not -path '*/.*' | fzf)
+        selected_file=$(find -L ./ -maxdepth 15 $search_type -not -path '*/.*' 2> >(grep -v "Too many levels of symbolic links" >&2) | sort | uniq | fzf)
     else
-        selected_file=$(find ./ -maxdepth 15 $search_type | fzf)
+        selected_file=$(find -L ./ -maxdepth 15 $search_type 2> >(grep -v "Too many levels of symbolic links" >&2) | sort | uniq | fzf)
     fi
 
     # If find found nothing, fallback to the selected directory
