@@ -1,12 +1,33 @@
 #!/usr/bin/env bash
 
+# Initialize variable to indicate detached mode is off by default
+detached_mode=0
+
 # Get the directory of the currently executing script
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 dir+="/cfg"
 
-if [[ $# -eq 1 ]]; then
-    selected=$1
+# Parse command line options
+while getopts "d" opt; do
+    case $opt in
+        d) detached_mode=1 ;;
+        \?) echo "Invalid option: -$OPTARG" >&2; exit 1 ;;
+    esac
+done
+
+# Remove the options from the positional parameters
+shift $((OPTIND-1))
+
+# Check if an argument is provided and if it is a valid directory
+if [[ $# -eq 1 ]] && [[ -d $1 ]]; then
+    selected=$(realpath "$1")
 else
+    # If no valid directory is provided, proceed with the selection process
+    if [[ $# -eq 1 ]]; then
+        echo "Invalid directory: $1"
+        exit 1
+    fi
+
     # Read locations from floc.txt in the script's directory, expand tildes, and join them with spaces
     search_locations=""
     while IFS= read -r line; do
@@ -20,21 +41,28 @@ if [[ -z $selected ]]; then
     exit 0
 fi
 
-selected_name=$(basename "$selected" | tr . _)
+selected_name=$(echo "$selected" | tr . _)
 
-# If inside a tmux session
-if [[ ! -z $TMUX ]]; then
+# Logic for tmux session creation based on detached mode
+if [[ $detached_mode -eq 1 ]]; then
+    # Create or attach to a tmux session in detached mode
     if ! tmux has-session -t=$selected_name 2> /dev/null; then
         tmux new-session -ds $selected_name -c $selected
     fi
-    tmux switch-client -t $selected_name
-    exit 0
-fi
-
-# If outside a tmux session
-if tmux has-session -t=$selected_name 2> /dev/null; then
-    tmux attach -t $selected_name
 else
-    tmux new-session -s $selected_name -c $selected
+    # If inside a tmux session
+    if [[ ! -z $TMUX ]]; then
+        if ! tmux has-session -t=$selected_name 2> /dev/null; then
+            tmux new-session -ds $selected_name -c $selected
+        fi
+        tmux switch-client -t $selected_name
+    else
+        # If outside a tmux session
+        if tmux has-session -t=$selected_name 2> /dev/null; then
+            tmux attach -t $selected_name
+        else
+            tmux new-session -s $selected_name -c $selected
+        fi
+    fi
 fi
 
