@@ -2,18 +2,26 @@
 
 # Initialize variable to indicate detached mode is off by default
 detached_mode=0
+existing_session=0
+link_session=0
 
 # Get the directory of the currently executing script
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 dir+="/cfg"
 
 # Parse command line options
-while getopts "d" opt; do
+while getopts "del" opt; do
     case $opt in
         d) detached_mode=1 ;;
+        e) existing_sessions=1 ;;
+        l) link_session=1 ;;
         \?) echo "Invalid option: -$OPTARG" >&2; exit 1 ;;
     esac
 done
+
+if [[ $link_session -eq 1 ]]; then
+    existing_sessions=1
+fi
 
 # Remove the options from the positional parameters
 shift $((OPTIND-1))
@@ -28,13 +36,21 @@ else
         exit 1
     fi
 
-    # Read locations from floc.txt in the script's directory, expand tildes, and join them with spaces
-    search_locations=""
-    while IFS= read -r line; do
-        search_locations+=" $(eval echo $line)"
-    done < "$dir/wloc.txt"
+    if [[ $existing_sessions -eq 1 ]]; then
+        selected=$(tmux list-sessions -F "#S" 2>/dev/null | fzf --prompt="Select tmux session: ")
+        if [[ -z $selected ]]; then
+            echo "No session selected."
+            exit 0
+        fi
+    else
+        # Read locations from floc.txt in the script's directory, expand tildes, and join them with spaces
+        search_locations=""
+        while IFS= read -r line; do
+            search_locations+=" $(eval echo $line)"
+        done < "$dir/wloc.txt"
 
-    selected=$(find -L $search_locations -mindepth 1 -maxdepth 1 -type d 2> >(grep -v "Too many levels of symbolic links" >&2) | sort | uniq | fzf)
+        selected=$(find -L $search_locations -mindepth 1 -maxdepth 1 -type d 2> >(grep -v "Too many levels of symbolic links" >&2) | sort | uniq | fzf)
+    fi
 fi
 
 if [[ -z $selected ]]; then
@@ -48,17 +64,27 @@ if [[ $detached_mode -eq 1 ]]; then
     # Create or attach to a tmux session in detached mode
     if ! tmux has-session -t=$selected_name 2> /dev/null; then
         tmux new-session -ds $selected_name -c $selected
+    elif [[ $link_session -eq 1 ]]; then
+        tmux new-session -t $selected_name -d
     fi
 else
     # If inside a tmux session
     if [[ ! -z $TMUX ]]; then
         if ! tmux has-session -t=$selected_name 2> /dev/null; then
             tmux new-session -ds $selected_name -c $selected
+        elif [[ $link_session -eq 1 ]]; then
+            if [[ $selected_name =~ ^(.*)-[0-9]+$ ]]; then
+                selected_name="${BASH_REMATCH[1]}"
+            fi
+            tmux new-session -dt $selected_name
+            selected_name=$(tmux list-sessions -F "#S" | grep "^${selected_name}" | tail -n 1)
         fi
         tmux switch-client -t $selected_name
     else
         # If outside a tmux session
-        if tmux has-session -t=$selected_name 2> /dev/null; then
+        if [[ $link_session -eq 1 ]]; then
+            tmux new-session -t $selected_name
+        elif tmux has-session -t=$selected_name 2> /dev/null; then
             tmux attach -t $selected_name
         else
             tmux new-session -s $selected_name -c $selected
