@@ -37,7 +37,7 @@ else
     fi
 
     if [[ $existing_sessions -eq 1 ]]; then
-        selected=$(tmux list-sessions -F "#S" 2>/dev/null | fzf --prompt="Select tmux session: ")
+        selected=$(tmux list-sessions -F "#S" 2>/dev/null | fzf --prompt="Select tmux session: " --preview='tmux capture-pane -pet {}' --preview-window down)
         if [[ -z $selected ]]; then
             echo "No session selected."
             exit 0
