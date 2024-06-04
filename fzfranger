@@ -1,0 +1,5 @@
+#!/bin/bash
+
+IFS= read -r path < <(find -type d | fzf)
+
+ranger "$path"

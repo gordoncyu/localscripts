@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# Wrapper for nohup to discard output by default
+
+nohup "$@" >/dev/null 2>&1 &

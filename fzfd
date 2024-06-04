@@ -1,0 +1,38 @@
+#!/bin/bash
+
+do_default=0
+default_output=""
+declare -a other_args
+
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        -def)
+            shift
+            if [[ "$#" -eq 0 ]]; then
+                echo "-def opt must be followed by a default output"
+                exit 1
+            fi
+            default_output="$1"
+            do_default=1
+            shift
+            ;;
+        *)
+            other_args+=("$1")
+            shift
+            ;;
+    esac
+done
+
+fzf_output="$(fzf "${other_args[@]}")"
+fzf_exit_code=$?
+if [[ $fzf_exit_code != 0 ]]; then
+    if [[ $do_default -eq 1 ]]; then
+        echo $default_output
+        exit 0
+    fi
+    echo $fzf_output
+    exit $fzf_exit_code
+fi
+
+echo $fzf_output
+exit 0
