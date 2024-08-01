@@ -2,7 +2,7 @@
 
 # Initialize variable to indicate detached mode is off by default
 detached_mode=0
-existing_session=0
+existing_sessions=0
 link_session=0
 
 # Get the directory of the currently executing script
@@ -46,7 +46,7 @@ else
         # Read locations from floc.txt in the script's directory, expand tildes, and join them with spaces
         search_locations=""
         while IFS= read -r line; do
-            search_locations+=" $(eval echo $line)"
+            search_locations+=" $(expandhome "$line")"
         done < "$dir/wloc.txt"
 
         selected=$(find -L $search_locations -mindepth 1 -maxdepth 1 -type d 2> >(grep -v "Too many levels of symbolic links" >&2) | sort | uniq | fzf)
@@ -62,32 +62,32 @@ selected_name=$(echo "$selected" | tr . _)
 # Logic for tmux session creation based on detached mode
 if [[ $detached_mode -eq 1 ]]; then
     # Create or attach to a tmux session in detached mode
-    if ! tmux has-session -t=$selected_name 2> /dev/null; then
-        tmux new-session -ds $selected_name -c $selected
+    if ! tmux has-session -t="$selected_name" 2> /dev/null; then
+        tmux new-session -ds "$selected_name" -c "$selected"
     elif [[ $link_session -eq 1 ]]; then
-        tmux new-session -t $selected_name -d
+        tmux new-session -t "$selected_name" -d
     fi
 else
     # If inside a tmux session
-    if [[ ! -z $TMUX ]]; then
-        if ! tmux has-session -t=$selected_name 2> /dev/null; then
-            tmux new-session -ds $selected_name -c $selected
+    if [[ -n $TMUX ]]; then
+        if ! tmux has-session -t="$selected_name" 2> /dev/null; then
+            tmux new-session -ds "$selected_name" -c "$selected"
         elif [[ $link_session -eq 1 ]]; then
             if [[ $selected_name =~ ^(.*)-[0-9]+$ ]]; then
                 selected_name="${BASH_REMATCH[1]}"
             fi
-            tmux new-session -dt $selected_name
+            tmux new-session -dt "$selected_name"
             selected_name=$(tmux list-sessions -F "#S" | grep "^${selected_name}" | tail -n 1)
         fi
-        tmux switch-client -t $selected_name
+        tmux switch-client -t "$selected_name"
     else
         # If outside a tmux session
         if [[ $link_session -eq 1 ]]; then
-            tmux new-session -t $selected_name
-        elif tmux has-session -t=$selected_name 2> /dev/null; then
-            tmux attach -t $selected_name
+            tmux new-session -t "$selected_name"
+        elif tmux has-session -t="$selected_name" 2> /dev/null; then
+            tmux attach -t "$selected_name"
         else
-            tmux new-session -s $selected_name -c $selected
+            tmux new-session -s "$selected_name" -c "$selected"
         fi
     fi
 fi
