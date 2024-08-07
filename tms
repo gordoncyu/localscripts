@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 # Initialize variable to indicate detached mode is off by default
+kill_mode=0
 detached_mode=0
 existing_sessions=0
 link_session=0
@@ -10,8 +11,9 @@ dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 dir+="/cfg"
 
 # Parse command line options
-while getopts "del" opt; do
+while getopts "kdel" opt; do
     case $opt in
+        k) kill_mode=1;;
         d) detached_mode=1 ;;
         e) existing_sessions=1 ;;
         l) link_session=1 ;;
@@ -19,7 +21,13 @@ while getopts "del" opt; do
     esac
 done
 
-if [[ $link_session -eq 1 ]]; then
+# this is horrendous but how tf else am I gonna ensure order of operations
+if [[ $kill_mode -eq 1 ]]; then if [[ $detached_mode -eq 1 ]] || [[ $link_session -eq 1 ]] then
+    echo "[k] kill mode flag is exclusive"
+    exit 1
+fi fi
+
+if [[ $link_session -eq 1 ]] || [[ $kill_mode -eq 1 ]]; then
     existing_sessions=1
 fi
 
@@ -37,7 +45,15 @@ else
     fi
 
     if [[ $existing_sessions -eq 1 ]]; then
-        selected=$(tmux list-sessions -F "#S" 2>/dev/null | fzf --prompt="Select tmux session: " --preview='tmux capture-pane -pet {}' --preview-window down)
+        if [[ $kill_mode -eq 1 ]]; then
+            multi_flag="-m"
+            multi_string="(s)"
+        else
+            multi_flag=""
+            multi_string=""
+        fi
+
+        selected=$(tmux list-sessions -F "#S" 2>/dev/null | fzf $multi_flag --prompt="Select tmux session$multi_string: " --preview='tmux capture-pane -pet {}' --preview-window down)
         if [[ -z $selected ]]; then
             echo "No session selected."
             exit 0
@@ -58,6 +74,14 @@ if [[ -z $selected ]]; then
 fi
 
 selected_name=$(echo "$selected" | tr . _)
+
+if [[ $kill_mode -eq 1 ]]; then
+    while IFS= read -r session_name; do
+        echo "killing session: $session_name"
+        tmux kill-session -t "$session_name"
+    done <<< "$selected_name"
+    exit 0
+fi
 
 # Logic for tmux session creation based on detached mode
 if [[ $detached_mode -eq 1 ]]; then
