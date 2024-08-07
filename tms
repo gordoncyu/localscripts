@@ -21,7 +21,7 @@ done
 
 # this is horrendous but how tf else am I gonna ensure order of operations
 if [[ $kill_mode -eq 1 ]]; then if [[ $detached_mode -eq 1 ]] || [[ $link_session -eq 1 ]] then
-    echo "[k] kill mode flag is exclusive"
+    echo "[k] kill mode flag is exclusive" >&2
     exit 1
 fi fi
 
@@ -36,7 +36,7 @@ if [[ $# -eq 1 ]] && [[ -d $1 ]]; then
     selected=$(realpath "$1")
 else
     if [[ $# -eq 1 ]]; then
-        echo "Invalid directory: $1"
+        echo "Invalid directory: $1" >&2
         exit 1
     fi
 
