@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Use read to safely capture the output, even if it includes special characters like quotes
 IFS= read -r path < <(zoxide query -i)
