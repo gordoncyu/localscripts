@@ -41,15 +41,16 @@ else
     fi
 
     if [[ $existing_sessions -eq 1 ]]; then
+        multi_flag=""
+        multi_string=""
+        kill_string=""
         if [[ $kill_mode -eq 1 ]]; then
             multi_flag="-m"
             multi_string="(s)"
-        else
-            multi_flag=""
-            multi_string=""
+            kill_string=" to kill"
         fi
 
-        selected=$(tmux list-sessions -F "#S" 2>/dev/null | fzf $multi_flag --prompt="Select tmux session$multi_string: " --preview='tmux capture-pane -pet {}' --preview-window down)
+        selected=$(tmux list-sessions -F "#S" 2>/dev/null | fzf $multi_flag --prompt="Select tmux session$multi_string$kill_string: " --preview='tmux capture-pane -pet {}' --preview-window down)
         if [[ -z $selected ]]; then
             echo "No session selected."
             exit 0
