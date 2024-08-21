@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+# Alacritty provides no option to exit with the exit code of its command/exec process
+# Wrapper proveded by https://github.com/alacritty/alacritty/issues/6081#issuecomment-1169944270
+# by user https://github.com/vejkse
+
+# Gather all arguments into an array until we get to --command or -e, at which
+# point the remaining arguments ($@) constitute the command itself.
+declare -a options
+while true ; do
+  case "$1" in
+    --command|-e)
+      shift
+      break
+      ;;
+
+    *)
+      options+=( "$1" )
+      shift
+      ;;
+  esac
+done
+
+exit_code="$(mktemp "$XDG_RUNTIME_DIR"/exit_code.XXXXXXXXXX)"
+clean_up() {
+  rm --force "$exit_code"
+}
+trap 'clean_up' EXIT
+
+# `%q` “quote[s] the argument in a way that can be reused as shell input”.
+alacritty "${options[@]}" \
+  --command bash -c "$(printf '%q ' "$@")"'; echo "$?" > '"$exit_code"
+
+exit "$(< "$exit_code")"
