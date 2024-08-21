@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+remove_flag=""
+flush_flag=""
+no_wrapper=0
+while getopts ":rfW" opt; do
+  case ${opt} in
+    r ) # refresh cache for virt_domain
+      remove_flag="-r"
+      ;;
+    f ) # flush whole cache
+      flush_flag="-f"
+      ;;
+    W ) # Don't use wrapper
+      no_wrapper=1
+      ;;
+    \? )
+      echo "Usage: sshv [-r|-f] [-W] [user]@[virt_domain] -- [additional ssh args]"
+      exit 1
+      ;;
+  esac
+done
+shift $((OPTIND -1))
+
+if [[ -n "$2" ]]; then
+    user_command="$2"
+    user_command_pad=" "
+else
+    user_command=""
+    user_command_pad=""
+fi
+
+# with ssh it can be a user@host or just host
+user_virt="$1"
+if [[ "$user_virt" == *"@"* ]]; then
+    user="${user_virt%@*}"
+    virt_name="${user_virt#*@}"
+else
+    user=""
+    virt_name="$user_virt"
+fi
+
+sshw_args=()
+for arg; do
+  if [[ $arg == '--' ]]; then
+    shift
+    sshw_args=("$@")
+    break
+  fi
+  shift
+done
+
+ip_addr=$(virt-ip $remove_flag $flush_flag "$virt_name")
+
+if [[ -z $user ]]; then
+    ssh_first_arg=$ip_addr
+else
+    ssh_first_arg="$user@$ip_addr"
+fi
+
+# like 'sshw gordo@debian12 -- -p 22'
+if [[ $no_wrapper -eq 0 ]]; then
+    sshw "$ssh_first_arg"$user_command_pad"$user_command" -- "${sshw_args[@]}"
+else
+    ssh "$ssh_first_arg" "${sshw_args[@]}" -t "$user_command"
+fi
+
