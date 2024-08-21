@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+scripts_dir="$(realpath "$0" | xargs -I{} dirname '{}')"
+
 kill_mode=0
 detached_mode=0
 existing_sessions=0
@@ -58,7 +60,7 @@ else
     else
         search_locations=""
         while IFS= read -r line; do
-            search_locations+=" $(expandhome "$line")"
+            search_locations+=" $("$scripts_dir/expandhome" "$line")"
         done < "$dir/wloc.txt"
 
         selected=$(find -L $search_locations -mindepth 1 -maxdepth 1 -type d 2> >(grep -v "Too many levels of symbolic links" >&2) | sort | uniq | fzf)
