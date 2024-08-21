@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+
+dupe_tmux=0
+tmux_maybe=0
+while getopts "tat:" opt; do
+    case ${opt} in
+        t)  # Flag to directly go to the tmux if it exists, else fail
+            dupe_tmux=1 ;;
+        a)  # Flag for automatic behavior (go to tmux if it exists)
+            tmux_maybe=1 ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            exit 1 ;;
+    esac
+done
+
+shift $((OPTIND -1))
+
+if [[ -z $1 ]]; then
+    current_window_props=$(hyprctl activewindow -j)
+else
+    current_window_props=$(hyprctl clients -j | jq ".[] | select(.address == \"$1\" or .address == \"0x$1\")")
+fi
+
+ignore=$(echo "$current_window_props" | jq 'select(.class | test("\\bAlacritty\\b"))')
+if [[ -z $ignore ]]; then
+    echo "Active window is not Alacritty" >&2
+    exit 1
+fi
+
+tem_pid=$(echo "$current_window_props" | jq '.pid')
+
+bash_pid=$(ps -o pid= --ppid $tem_pid)
+
+term_device=$(ps -o tty= -p $bash_pid)
+
+# get newest bash process (probably deepest nested current running)
+bash_pid=$(ps t $term_device -o pid=,comm= | awk ' $2 ~ /^bash$/ { print $1 } ' | tail -n 1)
+
+cd /proc/$bash_pid
+cd "$(readlink cwd)"
+# don't ask why it's like this; cd $"(readlink /proc/$bash_pid/cwd)" didn't work
+
+ssh_path=$(which ssh)
+sshw_path=$(which sshw 2>/dev/null || echo 'sshw')
+sshv_path=$(which sshv 2>/dev/null || echo 'sshv')
+bash_path=$(which bash)
+
+ssh_regex="${ssh_path//\//\\\/}|ssh"
+sshw_regex="${sshw_path//\//\\\/}|sshw"
+sshv_regex="${sshv_path//\//\\\/}|sshv"
+
+user_hostname_regex="^($bash_path\ |\/bin\/bash |bash )?($ssh_regex|$sshw_regex|$sshv_regex) +((-[a-zA-Z]+ *)* )?([^[:space:]]+)"
+
+fg_cmdlines=$(ps t $term_device -o pid=,stat= | awk ' $2 ~ /+/ { print $1 } ' | xargs -L 1 ps -o command= --pid)
+
+ssh_cmdline=$(echo $fg_cmdlines | grep -E "$user_hostname_regex")
+ssh_cmdline=$(echo $ssh_cmdline | head -n 1)
+
+if [[ -z "$ssh_cmdline" ]]; then
+    ignore=$(ps t $term_device -o pid=,stat=,cmd= | awk '$2 ~ /+/' | grep tmux)
+    if [[ $? == 0 ]] && [[ $dupe_tmux -eq 1 || $tmux_maybe -eq 1 ]]; then
+        tmux_session=$(tmux list-clients | grep "^/dev/$term_device: " | awk '{ print $2 }')
+        exec alacritty -e tmux new-session -t "$tmux_session"
+    else
+        if [[ $dupe_tmux -eq 1 ]]; then
+            echo "No tmux session found, exiting." >&2
+            exit 1
+        fi
+
+        echo "No tmux session found, opening a default Alacritty window." >&2
+        exec alacritty
+    fi
+fi
+
+term_device_formatted=_dev_${term_device//\//_}
+
+exec_command="
+map_dir=~/.local/state/duptem/tty_mappings/ssh/connections/\$(echo \$SSH_CLIENT | awk -v OFS='/' '{ print \$3,\$1,\$2 }')
+tty_mapping=\$(find \$map_dir -type f -exec basename {} ';' 2>/dev/null | awk ' /^$term_device_formatted/ { print \$0 } ' | head -n 1)
+mapped_tty=\$(echo \$tty_mapping | cut -d' ' -f2 | sed 's/_/\\//g')
+
+if [[ ! -e \$mapped_tty ]]; then
+    # echo 'Mapped TTY does not exist, defaulting to standard login shell.'
+    exec bash
+fi
+
+bash_pid=\$(ps t \$mapped_tty -o pid=,comm= | awk ' \$2 ~ /^bash$/ { print \$1 } ' | tail -n 1)
+if [[ -z \$bash_pid ]]; then
+    # echo 'No bash process found on mapped TTY, defaulting to standard login shell.'
+    exec bash
+fi
+
+tmux_session=\$(tmux list-clients 2>/dev/null | grep \"^\$mapped_tty: \" | awk '{print \$2}')
+if [[ -n \$tmux_session ]]; then
+    tmux new-session -t \$tmux_session
+else
+    cd /proc/\$bash_pid
+    cd \"\$(readlink cwd)\"
+    exec bash
+fi
+"
+
+if [[ $ssh_cmdline =~ $user_hostname_regex ]]; then
+    for i in "${!BASH_REMATCH[@]}"; do
+        echo "BASH_REMATCH[$i]: '${BASH_REMATCH[$i]}'"
+    done
+    ssh_util="${BASH_REMATCH[2]}"
+    ssh_flags="${BASH_REMATCH[3]}"
+    user_hostname="${BASH_REMATCH[5]}"
+fi
+
+if [[ "$ssh_util" == *"sshv"* ]]; then
+    sshv_flags=""
+    if echo "$ssh_flags" | grep -E '(^|[^-])-[a-zA-Z]*W' > /dev/null; then
+        sshv_flags="-W $sshv_flags"
+    fi
+
+    exec alacritty -e "$sshv_path" $sshv_flags"$user_hostname" "$exec_command"
+elif [[ "$ssh_util" == *"sshw"* ]]; then
+    exec alacritty -e "$sshw_path" "$user_hostname" "$exec_command"
+else
+    exec alacritty -e "$ssh_path" -t "$user_hostname" "$exec_command"
+fi

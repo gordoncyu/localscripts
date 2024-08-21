@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+
+ssh_source_tty=$(tty)
+if [[ $? != 0 ]]; then
+    ssh "$@"
+    exit 0
+fi
+
+regex="^-"
+if [[ $2 =~ $regex ]] || [[ -z $2 ]]; then
+    user_command="bash"
+else
+    user_command=$2 # i pray to von neuman and charles babbage against variable collisions
+fi
+
+ssh_source_tty=${ssh_source_tty//\//_}
+map_tty_commands="
+my_tty=\$(tty);
+my_tty=\${my_tty//\\//_};
+conn_dir=\"\$(echo ~)/.local/state/duptem/tty_mappings/ssh/connections\"
+map_dir=\"\$conn_dir/\$(echo \$SSH_CLIENT | awk -v OFS='/' ' { print \$3,\$1,\$2 } ')\"
+
+# behold my creation
+# basically it just finds all tcp connections and makes sure that all the dirs in the mapping dir have a matching connection.
+# otherwise the mapping must be stale; delete
+grep -vFx -f <(ss -tn | awk 'NR>1 {print \$4,\$5}' | tr ':' ' ' | awk -v OFS='/' '{print \$2,\$3,\$4}' | grep -v '/127.0.0.1/') <(find \$conn_dir -mindepth 3 -maxdepth 3 | grep -oE '[0-9]{1,5}/(([0-9]{1,3}\\.){3}[0-9]{1,3}|([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|(([0-9a-fA-F]{1,4}:){1,7}:|:([0-9a-fA-F]{1,4}:){1,7}|([0-9]{1,3}\\.){3}[0-9]{1,3}))/[0-9]{1,5}') | xargs -I{} sh -c \"rm -rf '\$conn_dir/{}'\"
+
+recursive_murder () {
+    local subdirs=\$(find \"\$1\" -maxdepth 1 -mindepth 1 -type d)
+    while IFS= read -r line; do
+        if [[ -z \$line ]]; then
+            continue
+        fi
+        recursive_murder \"\$line\"
+    done <<< \"\$subdirs\"
+
+    if [[ -z \$(ls -1A \"\$1\") ]]; then
+        rmdir \"\$1\"
+    fi
+}
+
+recursive_murder_children () {
+    local subdirs=\$(find \"\$1\" -maxdepth 1 -mindepth 1 -type d)
+    while IFS= read -r line; do
+        if [[ -z \$line ]]; then
+            continue
+        fi
+        recursive_murder \"\$line\"
+    done <<< \"\$subdirs\"
+}
+
+recursive_murder_children \"\$conn_dir\"
+
+map_file=\"\$map_dir/$ssh_source_tty \$my_tty\"
+
+# remove conflicting map files
+find \"\$map_dir\" -maxdepth 1 -mindepth 1 -type f 2>/dev/null | xargs -I{} basename '{}' | grep \"^$ssh_source_tty \| \$my_tty\\\$\" | xargs -I{} rm \"\$map_dir/{}\"
+
+mkdir -p \"\$map_dir\"
+touch \"\$map_file\";
+$user_command;
+rm \"\$map_file\"
+
+recursive_murder_children \$conn_dir
+"
+
+ssh_args=()
+post_double_dash=false
+for arg in "$@"; do
+    if [[ $arg == "--" ]]; then
+        post_double_dash=true
+        continue
+    fi
+    if [[ $post_double_dash == true ]]; then
+        ssh_args+=("$arg")
+    fi
+done
+set -- "$1"
+ssh "$@" "${ssh_args[@]}" -t "$map_tty_commands" 
+
