@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+remove_from_cache() {
+    local virt_name="$1"
+    local cache_file="$2"
+    grep -v "^$virt_name " "$cache_file" > "$cache_file.tmp"
+    mv "$cache_file.tmp" "$cache_file"
+}
+
+flush_cache() {
+    local cache_file="$1"
+    > "$cache_file"
+}
+
+while getopts ":rf" opt; do
+  case ${opt} in
+    r )
+      remove_flag=true
+      ;;
+    f )
+      flush_flag=true
+      ;;
+    \? )
+      echo "Usage: virt-ip [-r|-f] [virt_domain]"
+      exit 1
+      ;;
+  esac
+done
+shift $((OPTIND -1))
+
+virt_name="$1"
+
+cache_dir="$HOME/.local/state/virt-ip"
+cache_file="$cache_dir/ip-addr-cache"
+
+mkdir -p "$cache_dir"
+touch "$cache_file"
+
+[[ "$flush_flag" == true ]] && flush_cache "$cache_file"
+[[ "$remove_flag" == true ]] && remove_from_cache "$virt_name" "$cache_file"
+
+# Check if the cache entry exists and extract it
+ip_addr=$(grep "^$virt_name " "$cache_file" | awk '{print $2}')
+
+if [[ -z "$ip_addr" ]]; then
+    # Discover IP with virsh domifaddr
+    domi_res="$(sudo virsh domifaddr "$virt_name")"
+    domi_exit_code=$?
+    if [[ $domi_exit_code -ne 0 ]]; then
+        echo "IP address search failed" >&2
+        exit $domi_exit_code
+    fi
+
+    # Extract IP address
+    ip_addr="$(echo "$domi_res" | awk 'NR==3 {print $4}' | cut -d'/' -f1)"
+
+    if ! echo "$ip_addr" | grep -Eo '([0-9]{1,3}(\.[0-9]{1,3}){3})|(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4})' > /dev/null; then
+        echo "IP address extraction failed" >&2
+        exit 1
+    fi
+
+    # Cache the new IP address
+    echo "$virt_name $ip_addr" >> "$cache_file"
+fi
+
+echo "$ip_addr"
+
