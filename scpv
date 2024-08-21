@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+
+# Function to parse and resolve IP for user@virt-name:path
+resolve_path() {
+    local input_path="$1"
+    local user=""
+    local virt_name=""
+    local file_path=""
+
+    # Check if the path contains a colon indicating a remote path
+    if [[ "$input_path" == *:* ]]; then
+        if [[ "$input_path" == *"@"* ]]; then
+            user="${input_path%@*}"
+            input_path="${input_path#*@}"
+        fi
+
+        virt_name="${input_path%%:*}"
+        file_path="${input_path#*:}"
+
+        local ip_addr=$(virt-ip $remove_flag $flush_flag "$virt_name")
+
+        if [[ -z $user ]]; then
+            echo "$ip_addr:$file_path"
+        else
+            echo "$user@$ip_addr:$file_path"
+        fi
+    else
+        # It's a local path
+        echo "$input_path"
+    fi
+}
+
+remove_flag=""
+flush_flag=""
+while getopts ":rf" opt; do
+  case ${opt} in
+    r )
+      remove_flag="-r"
+      ;;
+    f )
+      flush_flag="-f"
+      ;;
+    \? )
+      echo "Usage: scpv [-r|-f] source destination -- [additional scp args]"
+      exit 1
+      ;;
+  esac
+done
+shift $((OPTIND -1))
+
+scp_args=()
+post_double_dash=false
+for arg in "$@"; do
+    if [[ $arg == '--' ]]; then
+        post_double_dash=true
+        continue
+    fi
+    if [[ $post_double_dash == true ]]; then
+        scp_args+=("$arg")
+        continue
+    fi
+    if [[ -z $source ]]; then
+        source="$arg"
+    elif [[ -z $destination ]]; then
+        destination="$arg"
+    fi
+done
+
+resolved_source=$(resolve_path "$source")
+resolved_destination=$(resolve_path "$destination")
+
+scp "${scp_args[@]}" "$resolved_source" "$resolved_destination"
+
