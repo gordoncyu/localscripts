@@ -114,6 +114,7 @@ if [[ "$ssh_util" == *"sshv"* ]]; then
     sshv_flags=""
     if echo "$ssh_flags" | grep -E '(^|[^-])-[a-zA-Z]*W' > /dev/null; then
         sshv_flags="-W $sshv_flags"
+        exec alacritty -e "$sshv_path" $sshv_flags"$user_hostname"
     fi
 
     exec alacritty -e "$sshv_path" $sshv_flags"$user_hostname" "$exec_command"
