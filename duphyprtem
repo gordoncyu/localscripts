@@ -120,5 +120,5 @@ if [[ "$ssh_util" == *"sshv"* ]]; then
 elif [[ "$ssh_util" == *"sshw"* ]]; then
     exec alacritty -e "$sshw_path" "$user_hostname" "$exec_command"
 else
-    exec alacritty -e "$ssh_path" -t "$user_hostname" "$exec_command"
+    exec alacritty -e "$ssh_path" "$user_hostname"
 fi
