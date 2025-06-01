@@ -1,112 +1,166 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
+"""
+tms – tmux-fzf helper (Python rewrite, keeps “/” in session names)
 
-scripts_dir="$(realpath "$0" | xargs -I{} dirname '{}')"
+Flags
+-----
+  -k   Kill one or more tmux sessions (exclusive)
+  -d   Detached mode
+  -e   Pick from existing sessions only
+  -l   Link (new client on existing session); implies -e
 
-kill_mode=0
-detached_mode=0
-existing_sessions=0
-link_session=0
+If DIR is supplied and is a directory, it’s used directly.
 
-# Get the directory of the currently executing script
-dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-dir+="/cfg"
+`cfg/wloc.txt` (next to this script) lists search roots.  
+A plain path contributes its first-level sub-dirs; an entry with glob
+chars (* ? [ ]) is expanded as-is.
+"""
 
-while getopts "kdel" opt; do
-    case $opt in
-        k) kill_mode=1;;
-        d) detached_mode=1 ;;
-        e) existing_sessions=1 ;;
-        l) link_session=1 ;;
-        \?) echo "Invalid option: -$OPTARG" >&2; exit 1 ;;
-    esac
-done
+from __future__ import annotations
 
-# this is horrendous but how tf else am I gonna ensure order of operations
-if [[ $kill_mode -eq 1 ]]; then if [[ $detached_mode -eq 1 ]] || [[ $link_session -eq 1 ]] then
-    echo "[k] kill mode flag is exclusive" >&2
-    exit 1
-fi fi
+import argparse
+import glob
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import List
 
-if [[ $link_session -eq 1 ]] || [[ $kill_mode -eq 1 ]]; then
-    existing_sessions=1
-fi
+# ───────────────────────── helpers ──────────────────────────
 
-# Remove the options from the positional parameters
-shift $((OPTIND-1))
 
-if [[ $# -eq 1 ]] && [[ -d $1 ]]; then
-    selected=$(realpath "$1")
-else
-    if [[ $# -eq 1 ]]; then
-        echo "Invalid directory: $1" >&2
-        exit 1
-    fi
+def run(cmd: List[str], check=False, capture=False) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, check=check, text=True,
+                          capture_output=capture)
 
-    if [[ $existing_sessions -eq 1 ]]; then
-        multi_flag=""
-        multi_string=""
-        kill_string=""
-        if [[ $kill_mode -eq 1 ]]; then
-            multi_flag="-m"
-            multi_string="(s)"
-            kill_string=" to kill"
-        fi
 
-        selected=$(tmux list-sessions -F "#S" 2>/dev/null | fzf $multi_flag --prompt="Select tmux session$multi_string$kill_string: " --preview='tmux capture-pane -pet {}' --preview-window down)
-        if [[ -z $selected ]]; then
-            echo "No session selected."
-            exit 0
-        fi
-    else
-        search_locations=""
-        while IFS= read -r line; do
-            search_locations+=" $("$scripts_dir/expandhome" "$line")"
-        done < "$dir/wloc.txt"
+def tmux_has(name: str) -> bool:
+    return run(["tmux", "has-session", "-t", name], check=False).returncode == 0
 
-        selected=$(find -L $search_locations -mindepth 1 -maxdepth 1 -type d 2> >(grep -v "Too many levels of symbolic links" >&2) | sort | uniq | fzf)
-    fi
-fi
 
-if [[ -z $selected ]]; then
-    exit 0
-fi
+def tmux_sessions() -> List[str]:
+    cp = run(["tmux", "list-sessions", "-F", "#S"], capture=True, check=False)
+    return cp.stdout.splitlines() if cp.stdout else []
 
-selected_name=$(echo "$selected" | tr . _)
 
-if [[ $kill_mode -eq 1 ]]; then
-    while IFS= read -r session_name; do
-        echo "killing session: $session_name"
-        tmux kill-session -t "$session_name"
-    done <<< "$selected_name"
-    exit 0
-fi
+def fzf_select(lines: List[str], prompt: str = "", multi=False) -> List[str]:
+    if not lines:
+        return []
+    cmd = ["fzf", "--prompt", prompt]
+    if multi:
+        cmd.append("-m")
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, text=True)
+    out, _ = proc.communicate("\n".join(lines))
+    return out.strip().splitlines() if proc.returncode == 0 else []
 
-if [[ $detached_mode -eq 1 ]]; then
-    if ! tmux has-session -t="$selected_name" 2> /dev/null; then
-        tmux new-session -ds "$selected_name" -c "$selected"
-    elif [[ $link_session -eq 1 ]]; then
-        tmux new-session -t "$selected_name" -d
-    fi
-else
-    if [[ -n $TMUX ]]; then
-        if ! tmux has-session -t="$selected_name" 2> /dev/null; then
-            tmux new-session -ds "$selected_name" -c "$selected"
-        elif [[ $link_session -eq 1 ]]; then
-            if [[ $selected_name =~ ^(.*)-[0-9]+$ ]]; then
-                selected_name="${BASH_REMATCH[1]}"
-            fi
-            tmux new-session -dt "$selected_name"
-            selected_name=$(tmux list-sessions -F "#S" | grep "^${selected_name}" | tail -n 1)
-        fi
-        tmux switch-client -t "$selected_name"
-    else
-        if [[ $link_session -eq 1 ]]; then
-            tmux new-session -t "$selected_name"
-        elif tmux has-session -t="$selected_name" 2> /dev/null; then
-            tmux attach -t "$selected_name"
-        else
-            tmux new-session -s "$selected_name" -c "$selected"
-        fi
-    fi
-fi
+
+# ───────────────────── directory collection ───────────────────
+
+
+def expand_line(raw: str) -> List[Path]:
+    raw = os.path.expandvars(os.path.expanduser(raw))
+    if any(ch in raw for ch in "*?[]"):
+        paths = [Path(p) for p in glob.glob(raw)]
+    else:
+        p = Path(raw)
+        paths = [c for c in p.iterdir()] if p.is_dir() else []
+    return [p for p in paths if p.is_dir()]
+
+
+def collect_choices(cfg: Path) -> List[str]:
+    choices: set[str] = set()
+    for line in cfg.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        choices.update(str(p) for p in expand_line(line))
+    return sorted(choices)
+
+
+# ─────────────────────────── main ────────────────────────────
+def main() -> None:
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("-k", dest="kill", action="store_true")
+    ap.add_argument("-d", dest="detached", action="store_true")
+    ap.add_argument("-e", dest="existing", action="store_true")
+    ap.add_argument("-l", dest="link", action="store_true")
+    ap.add_argument("dir", nargs="?", default=None)
+    args = ap.parse_args()
+
+    # exclusivity
+    if args.kill and (args.detached or args.link):
+        print("[-k] is exclusive of -d and -l", file=sys.stderr)
+        sys.exit(1)
+
+    if args.link or args.kill:
+        args.existing = True
+
+    script_dir = Path(__file__).resolve().parent
+    cfg_file = script_dir / "cfg" / "wloc.txt"
+    inside_tmux = bool(os.environ.get("TMUX"))
+
+    # ── selection ──
+    selections: List[str]
+
+    if args.dir and Path(args.dir).expanduser().is_dir() and not args.existing:
+        selections = [str(Path(args.dir).expanduser().resolve())]
+    else:
+        if args.existing:
+            prompt = "Select tmux session"
+            prompt += "(s) to kill: " if args.kill else " to link: " if args.link else ": "
+            selections = fzf_select(tmux_sessions(), prompt=prompt, multi=args.kill)
+        else:
+            selections = fzf_select(collect_choices(cfg_file), prompt="Select directory: ")
+
+    if not selections:
+        sys.exit(0)
+
+    # ── kill mode ──
+    if args.kill:
+        for sess in selections:
+            print(f"killing session: {sess}")
+            run(["tmux", "kill-session", "-t", sess])
+        return
+
+    # from here on we operate on a single target
+    target = selections[0]
+
+    # ── derive session name ──
+    if args.existing and not args.dir:
+        sess_name = target
+        workdir = None
+    else:
+        workdir = target
+        # KEEP “/”; replace space, dot, and parentheses with underscores
+        sess_name = re.sub(r"[ .()]", "_", workdir)
+
+    # ── detached handling ──
+    if args.detached:
+        if not tmux_has(sess_name):
+            run(["tmux", "new-session", "-ds", sess_name, "-c", workdir])
+        elif args.link:
+            run(["tmux", "new-session", "-t", sess_name, "-d"])
+        return
+
+    # ── normal / link / attach ──
+    if inside_tmux:
+        if not tmux_has(sess_name):
+            run(["tmux", "new-session", "-ds", sess_name, "-c", workdir])
+        elif args.link:
+            run(["tmux", "new-session", "-dt", sess_name])
+            sess_name = next(s for s in reversed(tmux_sessions()) if s.startswith(sess_name))
+        run(["tmux", "switch-client", "-t", sess_name])
+    else:
+        if args.link:
+            run(["tmux", "new-session", "-t", sess_name])
+        elif tmux_has(sess_name):
+            run(["tmux", "attach", "-t", sess_name])
+        else:
+            run(["tmux", "new-session", "-s", sess_name, "-c", workdir])
+
+
+if __name__ == "__main__":
+    main()
 
