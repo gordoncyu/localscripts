@@ -76,5 +76,35 @@ for arg in "$@"; do
     fi
 done
 set -- "$1"
-ssh "$@" "${ssh_args[@]}" -t "$map_tty_commands" 
+
+# ---------------- Retry logic & stats ----------------
+# If ssh returns 255 (network/handshake failure), keep trying until it doesn’t.
+
+attempts=0
+total_fail_time=0
+overall_start=$(date +%s)
+
+while true; do
+    run_start=$(date +%s)
+    ssh "$@" "${ssh_args[@]}" -t "$map_tty_commands"
+    exit_status=$?
+    run_end=$(date +%s)
+    run_time=$((run_end - run_start))
+
+    # Success or non-retryable exit ─ print summary & propagate status
+    if [[ $exit_status -ne 255 ]]; then
+        overall_end=$(date +%s)
+        total_elapsed=$((overall_end - overall_start))
+        echo "ssh exited with status $exit_status after ${total_elapsed}s (retries: $attempts)" >&2
+        exit $exit_status
+    fi
+
+    # ssh errored → update stats & retry
+    attempts=$((attempts + 1))
+    total_fail_time=$((total_fail_time + run_time))
+    avg_time=$((total_fail_time / attempts))
+    echo "retry #$attempts: exit 255 after ${run_time}s (avg ${avg_time}s, total ${total_fail_time}s)" >&2
+
+    sleep 2   # back-off; tweak as desired
+done
 

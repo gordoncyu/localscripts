@@ -92,7 +92,7 @@ if [[ -z \$bash_pid ]]; then
 fi
 
 tmux_session=\$(tmux list-clients 2>/dev/null | grep \"^\$mapped_tty: \" | awk '{print \$2}')
-if [[ -n \$tmux_session ]]; then
+if [[ -n \$tmux_session ]] && [[ $dupe_tmux -eq 1 || $tmux_maybe -eq 1 ]]; then
     tmux new-session -t \$tmux_session
 else
     cd /proc/\$bash_pid
